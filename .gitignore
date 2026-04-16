@@ -1,0 +1,7 @@
+node_modules/
+bridge-name.txt
+bridge-leaders.txt
+bridge-members.txt
+bridge_target_in.txt
+bridge_target_out.txt
+*.log
