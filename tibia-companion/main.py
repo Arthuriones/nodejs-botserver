@@ -14,6 +14,7 @@ import ctypes
 from network import BotServerClient
 
 PLACEHOLDER = b"__COMBO__________________________"  # 30 chars
+STOP_PLACEHOLDER = b"__STOPCMD________________________"  # 30 chars
 POT_PLACEHOLDER = b"__POTCMD_PLACEHOLDER_____________________"  # 40 chars
 
 CONFIG_FILE = "companion-config.json"
@@ -328,6 +329,7 @@ class ComboCompanion:
             print(f"[MEM] Conectado ao pbotwars (PID {pm.process_id})", flush=True)
 
             self._mem_addrs = self._scan_memory(pm, PLACEHOLDER, "COMBO")
+            self._stop_mem_addrs = self._scan_memory(pm, STOP_PLACEHOLDER, "STOP")
             self._pot_mem_addrs = self._scan_memory(pm, POT_PLACEHOLDER, "POT")
 
         except Exception as e:
@@ -420,6 +422,7 @@ class ComboCompanion:
         else:
             self.btn_toggle.config(text="COMBO OFF", bg="#552222", fg="#ff6666")
             self.leader_target_name = ""
+            self._write_to_memory(self._stop_mem_addrs, "stopattack", len(STOP_PLACEHOLDER))
             self._write_target_to_memory(PLACEHOLDER.decode())
 
     # === Main tick ===
@@ -458,6 +461,9 @@ class ComboCompanion:
                 self.connected_members[sender] = time.time()
 
             elif topic == "LeaderTarget":
+                # Ignora mensagens do proprio player
+                if sender == self.config.get("player_name", ""):
+                    continue
                 leaders = list(self.list_leaders.get(0, tk.END))
                 if sender in leaders and self.combo_enabled:
                     if payload is None:
@@ -471,7 +477,12 @@ class ComboCompanion:
 
                     if self.leader_target_name:
                         self._write_target_to_memory(self.leader_target_name)
+                        # Escreve placeholder no stop pra nao executar stopattack
+                        self._write_to_memory(self._stop_mem_addrs, STOP_PLACEHOLDER.decode(), len(STOP_PLACEHOLDER))
                     else:
+                        # Escreve stopattack no stop placeholder
+                        self._write_to_memory(self._stop_mem_addrs, "stopattack", len(STOP_PLACEHOLDER))
+                        # Restaura combo placeholder
                         self._write_target_to_memory(PLACEHOLDER.decode())
 
             elif topic == "NavPotionReq":
