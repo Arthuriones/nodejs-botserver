@@ -14,7 +14,7 @@ import ctypes
 from network import BotServerClient
 
 PLACEHOLDER = b"__COMBO__________________________"  # 30 chars
-POT_PLACEHOLDER = b"__POT____________________________"  # 30 chars
+POT_PLACEHOLDER = b"__POTCMD_PLACEHOLDER_____________________"  # 40 chars
 
 CONFIG_FILE = "companion-config.json"
 
@@ -26,6 +26,10 @@ DEFAULT_CONFIG = {
     "my_voc": "EK",
     "mp_request_percent": 50,
     "mp_request_enabled": False,
+    "pot_mp_EK": 268,
+    "pot_mp_ED": 268,
+    "pot_mp_MS": 268,
+    "pot_mp_RP": 268,
     "leaders": [],
     "enemies": [],
 }
@@ -60,6 +64,7 @@ class ComboCompanion:
         self._last_mp = 100
         self._pot_target = ""
         self._log_truncate_timer = 0
+        self._member_vocs = {}  # name -> voc (EK, ED, MS, RP)
 
         self._build_ui()
         self._load_lists()
@@ -182,6 +187,21 @@ class ComboCompanion:
                       activebackground="#1e1e1e", font=("Consolas", 9),
                       command=self._save_voc).pack(side="left", padx=5)
 
+        # === Potion IDs por vocacao ===
+        pot_frame = tk.Frame(self.root, bg="#1e1e1e")
+        pot_frame.pack(fill="x", padx=10, pady=(0, 5))
+
+        tk.Label(pot_frame, text="Potion MP:", **style).pack(side="left")
+        self.pot_entries = {}
+        for v in ["EK", "ED", "MS", "RP"]:
+            tk.Label(pot_frame, text=f"{v}:", bg="#1e1e1e", fg="#888",
+                    font=("Consolas", 8)).pack(side="left", padx=(5, 0))
+            entry = tk.Entry(pot_frame, width=5, **style_entry)
+            entry.pack(side="left", padx=(2, 0))
+            entry.insert(0, str(self.config.get(f"pot_mp_{v}", 268)))
+            entry.bind("<FocusOut>", lambda e, voc=v: self._save_pot_id(voc))
+            self.pot_entries[v] = entry
+
         tk.Frame(self.root, bg="#444", height=1).pack(fill="x", padx=10, pady=5)
 
         # === Bottom: Combo + alvo ===
@@ -207,6 +227,8 @@ class ComboCompanion:
                  bg="#1e1e1e", fg="#555", font=("Consolas", 7)).pack()
         tk.Label(info, text="+ auto 1000 | exec log POS:$posx:$posy:$posz  +  auto 1000 | exec log MP:$mppc",
                  bg="#1e1e1e", fg="#555", font=("Consolas", 7)).pack()
+        tk.Label(info, text="+ auto 500 | exec useoncreature __POTCMD_PLACEHOLDER_____________________",
+                 bg="#1e1e1e", fg="#555", font=("Consolas", 7)).pack()
 
     # === List management ===
 
@@ -225,6 +247,14 @@ class ComboCompanion:
         self.config["my_voc"] = self.voc_var.get()
         self.config["mp_request_enabled"] = self.mp_request_var.get()
         save_config(self.config)
+
+    def _save_pot_id(self, voc):
+        try:
+            val = int(self.pot_entries[voc].get())
+            self.config[f"pot_mp_{voc}"] = val
+            save_config(self.config)
+        except ValueError:
+            pass
 
     def _add_leader_from_connected(self):
         sel = self.list_connected.curselection()
@@ -367,13 +397,19 @@ class ComboCompanion:
         self._current_mem_target = target_name
         print(f"[MEM] Target: '{target_name}'", flush=True)
 
-    def _write_pot_target(self, name):
-        if name == self._pot_target:
+    def _write_pot_cmd(self, pot_id, name):
+        """Escreve 'ID NomeDoPlayer' no placeholder de pot."""
+        if pot_id and name:
+            cmd = f"{pot_id} {name}"
+        else:
+            cmd = POT_PLACEHOLDER.decode()
+
+        if cmd == self._pot_target:
             return
-        self._write_to_memory(self._pot_mem_addrs, name, len(POT_PLACEHOLDER))
-        self._pot_target = name
-        if name and name != POT_PLACEHOLDER.decode():
-            print(f"[POT] Potando: '{name}'", flush=True)
+        self._write_to_memory(self._pot_mem_addrs, cmd, len(POT_PLACEHOLDER))
+        self._pot_target = cmd
+        if pot_id and name:
+            print(f"[POT] Potando '{name}' com item {pot_id}", flush=True)
 
     # === Combo toggle ===
 
@@ -401,7 +437,12 @@ class ComboCompanion:
         if self.combo_enabled:
             self.ws.send("ComboMember", self.config.get("player_name", ""))
 
-            # Heartbeat NavPotion com vocacao
+        # NavPotion heartbeat — independente do combo, a cada ~1s (3 ticks de 300ms)
+        if not hasattr(self, '_navpot_counter'):
+            self._navpot_counter = 0
+        self._navpot_counter += 1
+        if self._navpot_counter >= 3:
+            self._navpot_counter = 0
             self.ws.send("NavPotionReq", {"type": "ping", "voc": self.config.get("my_voc", "EK")})
 
         # Processar mensagens
@@ -434,12 +475,19 @@ class ComboCompanion:
                         self._write_target_to_memory(PLACEHOLDER.decode())
 
             elif topic == "NavPotionReq":
-                if isinstance(payload, dict) and payload.get("type") == "MP":
-                    # Alguem pediu mana — escreve o nome pra Elf Bot potar
-                    if self.combo_enabled and sender != self.config.get("player_name", ""):
-                        self._write_pot_target(sender)
-                        # Limpa depois de 2 segundos
-                        self.root.after(2000, lambda: self._write_pot_target(POT_PLACEHOLDER.decode()))
+                if isinstance(payload, dict):
+                    # Guarda vocacao do membro
+                    if payload.get("voc"):
+                        self._member_vocs[sender] = payload["voc"]
+
+                    if payload.get("type") == "MP":
+                        if sender != self.config.get("player_name", ""):
+                            # Pega vocacao e potion ID correto
+                            voc = self._member_vocs.get(sender, "EK")
+                            pot_id = self.config.get(f"pot_mp_{voc}", 268)
+                            # Escreve "ID NomeDoPlayer" na memoria
+                            self._write_pot_cmd(pot_id, sender)
+                            self.root.after(2000, lambda: self._write_pot_cmd(0, ""))
 
         # Limpa membros offline
         now = time.time()
