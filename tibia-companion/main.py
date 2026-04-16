@@ -13,8 +13,7 @@ import ctypes
 
 from network import BotServerClient
 
-PLACEHOLDER = b"__COMBO__________________________"  # 30 chars
-STOP_PLACEHOLDER = b"__STOPCMD________________________"  # 30 chars
+COMBO_SEARCH = b"attack __COMBO__________________________"  # 37 chars — busca o comando inteiro
 POT_PLACEHOLDER = b"__POTCMD_PLACEHOLDER_____________________"  # 40 chars
 
 CONFIG_FILE = "companion-config.json"
@@ -328,8 +327,7 @@ class ComboCompanion:
             self._mem_handle = pm.process_handle
             print(f"[MEM] Conectado ao pbotwars (PID {pm.process_id})", flush=True)
 
-            self._mem_addrs = self._scan_memory(pm, PLACEHOLDER, "COMBO")
-            self._stop_mem_addrs = self._scan_memory(pm, STOP_PLACEHOLDER, "STOP")
+            self._mem_addrs = self._scan_memory(pm, COMBO_SEARCH, "COMBO")
             self._pot_mem_addrs = self._scan_memory(pm, POT_PLACEHOLDER, "POT")
 
         except Exception as e:
@@ -392,12 +390,13 @@ class ComboCompanion:
             )
         return True
 
-    def _write_target_to_memory(self, target_name):
-        if target_name == self._current_mem_target:
+    def _write_combo_cmd(self, cmd):
+        """Sobrescreve o comando combo inteiro (attack X ou stopattack)."""
+        if cmd == self._current_mem_target:
             return
-        self._write_to_memory(self._mem_addrs, target_name, len(PLACEHOLDER))
-        self._current_mem_target = target_name
-        print(f"[MEM] Target: '{target_name}'", flush=True)
+        self._write_to_memory(self._mem_addrs, cmd, len(COMBO_SEARCH))
+        self._current_mem_target = cmd
+        print(f"[MEM] Combo: '{cmd}'", flush=True)
 
     def _write_pot_cmd(self, pot_id, name):
         """Escreve 'ID NomeDoPlayer' no placeholder de pot."""
@@ -422,8 +421,8 @@ class ComboCompanion:
         else:
             self.btn_toggle.config(text="COMBO OFF", bg="#552222", fg="#ff6666")
             self.leader_target_name = ""
-            self._write_to_memory(self._stop_mem_addrs, "stopattack", len(STOP_PLACEHOLDER))
-            self._write_target_to_memory(PLACEHOLDER.decode())
+            self._write_combo_cmd("stopattack")
+            self.root.after(1000, lambda: self._write_combo_cmd(COMBO_SEARCH.decode()))
 
     # === Main tick ===
 
@@ -476,14 +475,12 @@ class ComboCompanion:
                         continue
 
                     if self.leader_target_name:
-                        self._write_target_to_memory(self.leader_target_name)
-                        # Escreve placeholder no stop pra nao executar stopattack
-                        self._write_to_memory(self._stop_mem_addrs, STOP_PLACEHOLDER.decode(), len(STOP_PLACEHOLDER))
+                        self._write_combo_cmd("attack " + self.leader_target_name)
                     else:
-                        # Escreve stopattack no stop placeholder
-                        self._write_to_memory(self._stop_mem_addrs, "stopattack", len(STOP_PLACEHOLDER))
-                        # Restaura combo placeholder
-                        self._write_target_to_memory(PLACEHOLDER.decode())
+                        # Para de atacar e restaura placeholder depois de 1s
+                        self._write_combo_cmd("stopattack")
+                        self.root.after(1000, lambda: self._write_combo_cmd(
+                            COMBO_SEARCH.decode()))
 
             elif topic == "NavPotionReq":
                 if isinstance(payload, dict):
