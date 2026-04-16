@@ -7,6 +7,8 @@ import threading
 import queue
 import json
 import time
+import ssl
+import certifi
 import websocket
 
 
@@ -24,16 +26,19 @@ class BotServerClient:
 
     def connect(self, url, player_name, channel="1"):
         """Inicia conexão em background thread."""
+        print(f"[WS] connect() chamado: {url} | nome: {player_name}", flush=True)
         self.url = url
         self.player_name = player_name
         self.channel = channel
         self._stop = False
 
         if self._thread and self._thread.is_alive():
+            print("[WS] Thread ja ativa, ignorando", flush=True)
             return
 
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        print("[WS] Thread iniciada", flush=True)
 
     def disconnect(self):
         self._stop = True
@@ -66,9 +71,13 @@ class BotServerClient:
         """Loop de conexão com auto-reconnect."""
         while not self._stop:
             try:
-                self._ws = websocket.WebSocket()
-                self._ws.settimeout(0.2)
+                print(f"[WS] Tentando conectar: {self.url}", flush=True)
+                self._ws = websocket.WebSocket(
+                    sslopt={"cert_reqs": ssl.CERT_REQUIRED, "ca_certs": certifi.where()}
+                )
+                self._ws.settimeout(5)
                 self._ws.connect(self.url)
+                print("[WS] Conectado!", flush=True)
 
                 # Init
                 init_msg = json.dumps({
@@ -104,8 +113,9 @@ class BotServerClient:
                         except Exception:
                             break
 
-            except Exception:
+            except Exception as e:
                 self.connected = False
+                print(f"[WS ERRO] {type(e).__name__}: {e}", flush=True)
 
             if not self._stop:
                 time.sleep(3)
