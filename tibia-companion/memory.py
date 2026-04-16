@@ -55,7 +55,7 @@ DEFAULT_ADDRESSES = {
 
 
 class TibiaMemoryReader:
-    def __init__(self, process_name="Tibia.exe", addresses=None):
+    def __init__(self, process_name="pbotwars.exe", addresses=None):
         self.process_name = process_name
         self.addr = {**DEFAULT_ADDRESSES, **(addresses or {})}
         self.pm = None

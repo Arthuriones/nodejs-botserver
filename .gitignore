@@ -4,4 +4,16 @@ bridge-leaders.txt
 bridge-members.txt
 bridge_target_in.txt
 bridge_target_out.txt
+companion-config.json
 *.log
+
+# PyInstaller / build artifacts
+tibia-companion/build/
+tibia-companion/dist/
+tibia-companion/*.spec
+
+# Memory scan scripts (debug only)
+tibia-companion/scan_*.py
+tibia-companion/scan_*.bat
+tibia-companion/test_*.py
+tibia-companion/test_*.bat
